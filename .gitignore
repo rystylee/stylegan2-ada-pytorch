@@ -4,3 +4,4 @@ __pycache__/
 venv/
 pretrained/
 out/
+out_video/
