@@ -51,6 +51,7 @@ def interpolate(src, dst, coef):
                 default='pad', help='scaling method for --size', required=False)
 @click.option('--size', type=size_range, help='size of output (in format x-y)')
 @click.option('--space', type=click.Choice(['z', 'w']), default='z', help='latent space', required=True)
+@click.option('--batch_size', type=int, default=1, help='batch size', required=False)
 
 
 def generate_images(
@@ -61,6 +62,7 @@ def generate_images(
     space: str,
     truncation_psi: float,
     noise_mode: str,
+    batch_size: int
 ):
     """Generate images using pretrained network pickle.
     """
@@ -84,23 +86,23 @@ def generate_images(
         G = legacy.load_network_pkl(f, custom=custom, **G_kwargs)['G_ema'].to(device) # type: ignore
 
     # Labels.
-    label = torch.zeros([1, G.c_dim], device=device)
+    label = torch.zeros([batch_size, G.c_dim], device=device)
 
     import random
     import time
 
-    src_z = torch.from_numpy(np.random.RandomState(random.randint(0, 500)).randn(2, G.z_dim)).to(device)
-    dst_z = torch.from_numpy(np.random.RandomState(random.randint(0, 500)).randn(2, G.z_dim)).to(device)
+    src_z = torch.from_numpy(np.random.RandomState(random.randint(0, 500)).randn(batch_size, G.z_dim)).to(device)
+    dst_z = torch.from_numpy(np.random.RandomState(random.randint(0, 500)).randn(batch_size, G.z_dim)).to(device)
 
     counter = 0.0
-    cap = cv2.VideoCapture(0)
-    while cap.isOpened():
+    while True:
         start_time = time.time()
 
         z = interpolate(src_z, dst_z, counter)
         img = G(z, label, truncation_psi=truncation_psi, noise_mode=noise_mode)
-        img = tvutils.make_grid(img, nrow=2, padding=0, normalize=False).unsqueeze(0)
-        # img = tvutils.make_grid(img, nrow=1, padding=1, normalize=False).unsqueeze(0)
+        if batch_size == 2:
+            img = tvutils.make_grid(img, nrow=2, padding=0, normalize=False).unsqueeze(0)
+            # img = tvutils.make_grid(img, nrow=1, padding=1, normalize=False).unsqueeze(0)
         img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
         img = img[0].cpu().numpy()
         img = img[:, :, ::-1]
@@ -114,7 +116,7 @@ def generate_images(
         if counter >= 1.0:
             counter = 0.0
             src_z = dst_z
-            dst_z = torch.from_numpy(np.random.RandomState(random.randint(0, 500)).randn(2, G.z_dim)).to(device)
+            dst_z = torch.from_numpy(np.random.RandomState(random.randint(0, 500)).randn(batch_size, G.z_dim)).to(device)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break

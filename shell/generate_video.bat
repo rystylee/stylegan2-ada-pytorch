@@ -1,0 +1,1 @@
+python generate_loop_video.py --network=pretrained/wikiart.pkl --trunc 1 --outdir out_video --fps 60 --num_frames 900 --num_interpolation 2 --video_name wikiart_loop_12.mp4

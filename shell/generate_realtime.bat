@@ -1,0 +1,1 @@
+python generate_realtime.py --trunc=1 --network=pretrained/wikiart.pkl
