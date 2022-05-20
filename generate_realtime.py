@@ -26,6 +26,7 @@ from opensimplex import OpenSimplex
 
 import cv2
 import torchvision.utils as tvutils
+from Library.Spout import Spout
 
 
 #----------------------------------------------------------------------------
@@ -52,6 +53,7 @@ def interpolate(src, dst, coef):
 @click.option('--size', type=size_range, help='size of output (in format x-y)')
 @click.option('--space', type=click.Choice(['z', 'w']), default='z', help='latent space', required=True)
 @click.option('--batch_size', type=int, default=1, help='batch size', required=False)
+@click.option('--is_spout', type=bool, default=False, help='Spout option', required=False)
 
 
 def generate_images(
@@ -62,7 +64,8 @@ def generate_images(
     space: str,
     truncation_psi: float,
     noise_mode: str,
-    batch_size: int
+    batch_size: int,
+    is_spout: bool
 ):
     """Generate images using pretrained network pickle.
     """
@@ -88,6 +91,10 @@ def generate_images(
     # Labels.
     label = torch.zeros([batch_size, G.c_dim], device=device)
 
+    if is_spout:
+        spout = Spout(silent=True, width=1024, height=1024)
+        spout.createSender('StyleGAN2-ada')
+
     import random
     import time
 
@@ -99,12 +106,18 @@ def generate_images(
         start_time = time.time()
 
         z = interpolate(src_z, dst_z, counter)
-        img = G(z, label, truncation_psi=truncation_psi, noise_mode=noise_mode)
-        if batch_size == 2:
-            img = tvutils.make_grid(img, nrow=2, padding=0, normalize=False).unsqueeze(0)
-            # img = tvutils.make_grid(img, nrow=1, padding=1, normalize=False).unsqueeze(0)
-        img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
-        img = img[0].cpu().numpy()
+        with torch.no_grad():
+            img = G(z, label, truncation_psi=truncation_psi, noise_mode=noise_mode)
+            if batch_size == 2:
+                img = tvutils.make_grid(img, nrow=2, padding=0, normalize=False).unsqueeze(0)
+                # img = tvutils.make_grid(img, nrow=1, padding=1, normalize=False).unsqueeze(0)
+            img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
+            img = img[0].cpu().numpy()
+
+        if is_spout:
+            spout.check()
+            spout.send(img)
+
         img = img[:, :, ::-1]
 
         end_time = time.time()
@@ -122,7 +135,6 @@ def generate_images(
             break
 
     cv2.destroyAllWindows()
-
 
 
 #----------------------------------------------------------------------------

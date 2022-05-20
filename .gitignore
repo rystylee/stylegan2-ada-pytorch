@@ -5,3 +5,7 @@ venv/
 pretrained/
 out/
 out_video/
+
+!Library/37/*
+!Library/35/*
+!Library/36/*
