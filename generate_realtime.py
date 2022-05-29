@@ -92,8 +92,8 @@ def generate_images(
     label = torch.zeros([batch_size, G.c_dim], device=device)
 
     if is_spout:
-        spout = Spout(silent=True, width=1024, height=1024)
-        spout.createSender('StyleGAN2-ada')
+        spout_material = Spout(silent=True, width=1024, height=1024)
+        spout_material.createSender('GAN-mat')
 
     import random
     import time
@@ -125,7 +125,19 @@ def generate_images(
 
         cv2.imshow('result', img)
 
+        # counter += 0.005
+        # counter += 0.0005
+        # counter += 0.01
+        # counter += 0.0025
+        # counter += 0.0005
+
+        # cloud
+        # counter += 0.001
+
+        # ffhq
+        # counter += 0.0001
         counter += 0.005
+
         if counter >= 1.0:
             counter = 0.0
             src_z = dst_z
