@@ -92,8 +92,8 @@ def generate_images(
     label = torch.zeros([batch_size, G.c_dim], device=device)
 
     if is_spout:
-        spout_material = Spout(silent=True, width=1024, height=1024)
-        spout_material.createSender('GAN-mat')
+        spout_src = Spout(silent=True, width=size[0], height=size[1])
+        spout_src.createSender('GAN-src')
 
     import random
     import time
@@ -115,8 +115,8 @@ def generate_images(
             img = img[0].cpu().numpy()
 
         if is_spout:
-            spout.check()
-            spout.send(img)
+            spout_src.check()
+            spout_src.send(img)
 
         img = img[:, :, ::-1]
 
