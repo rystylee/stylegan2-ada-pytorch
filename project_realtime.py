@@ -45,7 +45,7 @@ def project(
     device: torch.device,
     is_spout: bool
 ):
-    assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
+    # assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
 
     def logprint(*args):
         if verbose:
@@ -83,7 +83,7 @@ def project(
         buf.requires_grad = True
 
     # Setup camera
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(0)
 
     if is_spout:
         spout_src = Spout(silent=True, width=G.img_resolution, height=G.img_resolution)
