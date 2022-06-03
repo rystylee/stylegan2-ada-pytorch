@@ -36,7 +36,6 @@ to_tensor = transforms.Compose([
 def project(
     G,
     *,
-    num_steps                  = 1000,
     w_avg_samples              = 10000,
     initial_learning_rate      = 0.02,
     initial_noise_factor       = 0.05,
@@ -99,7 +98,6 @@ def project(
         target_pil = target_pil.resize((G.img_resolution, G.img_resolution), PIL.Image.Resampling.LANCZOS)
         target_uint8 = np.array(target_pil, dtype=np.uint8)
         target = torch.tensor(target_uint8.transpose([2, 0, 1]), device=device)
-        # target = to_tensor(target_pil)
 
         # Features for target image.
         target_images = target.unsqueeze(0).to(device).to(torch.float32)
@@ -176,7 +174,6 @@ def size_range(s: str) -> List[int]:
 
 @click.command()
 @click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
-@click.option('--num-steps',              help='Number of optimization steps', type=int, default=1000, show_default=True)
 @click.option('--seed',                   help='Random seed', type=int, default=303, show_default=True)
 @click.option('--scale-type',
                 type=click.Choice(['pad', 'padside', 'symm','symmside']),
@@ -187,7 +184,6 @@ def size_range(s: str) -> List[int]:
 def run_projection(
     network_pkl: str,
     seed: int,
-    num_steps: int,
     scale_type: Optional[str],
     size: Optional[List[int]],
     is_spout: bool
@@ -224,7 +220,6 @@ def run_projection(
     # Optimize projection.
     project(
         G,
-        num_steps=num_steps,
         device=device,
         verbose=True,
         is_spout=is_spout

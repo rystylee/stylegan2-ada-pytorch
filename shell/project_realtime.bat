@@ -1,0 +1,1 @@
+python project_realtime.py  --network=https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/ffhq.pkl --is_spout=False
