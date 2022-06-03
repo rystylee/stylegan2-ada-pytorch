@@ -92,7 +92,10 @@ def generate_images(
     label = torch.zeros([batch_size, G.c_dim], device=device)
 
     if is_spout:
-        spout_src = Spout(silent=True, width=size[0], height=size[1])
+        if size:
+            spout_src = Spout(silent=True, width=size[0], height=size[1])
+        else:
+            spout_src = Spout(silent=True, width=G.img_resolution, height=G.img_resolution)
         spout_src.createSender('GAN-src')
 
     import random
