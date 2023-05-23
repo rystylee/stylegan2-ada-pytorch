@@ -23,21 +23,23 @@ import torchvision.transforms as transforms
 import dnnlib
 import legacy
 
+import random
 from typing import List, Optional
 import time
 import cv2
 from Library.Spout import Spout
 
-to_tensor = transforms.Compose([
-    transforms.ToTensor()
-])
+#----------------------------------------------------------------------------
+def interpolate(src, dst, coef):
+    return src + (dst - src) * coef
 
+#----------------------------------------------------------------------------
 
 def project(
-    G,
+    G_1,
+    G_2,
     *,
     w_avg_samples              = 10000,
-    # initial_learning_rate      = 0.02,
     initial_learning_rate      = 0.02,
     initial_noise_factor       = 0.05,
     regularize_noise_weight    = 1e5,
@@ -51,18 +53,19 @@ def project(
         if verbose:
             print(*args)
 
-    G = copy.deepcopy(G).eval().requires_grad_(False).to(device) # type: ignore
+    G_1 = copy.deepcopy(G_1).eval().requires_grad_(False).to(device) # type: ignore
+    G_2 = copy.deepcopy(G_2).eval().requires_grad_(False).to(device) # type: ignore
 
     # Compute w stats.
     logprint(f'Computing W midpoint and stddev using {w_avg_samples} samples...')
-    z_samples = np.random.RandomState(123).randn(w_avg_samples, G.z_dim)
-    w_samples = G.mapping(torch.from_numpy(z_samples).to(device), None)  # [N, L, C]
+    z_samples = np.random.RandomState(123).randn(w_avg_samples, G_1.z_dim)
+    w_samples = G_1.mapping(torch.from_numpy(z_samples).to(device), None)  # [N, L, C]
     w_samples = w_samples[:, :1, :].cpu().numpy().astype(np.float32)       # [N, 1, C]
     w_avg = np.mean(w_samples, axis=0, keepdims=True)      # [1, 1, C]
     w_std = (np.sum((w_samples - w_avg) ** 2) / w_avg_samples) ** 0.5
 
     # Setup noise inputs.
-    noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
+    noise_bufs = { name: buf for (name, buf) in G_1.synthesis.named_buffers() if 'noise_const' in name }
     w_noise_scale = w_std * initial_noise_factor # noise scale is constant
 
     # Load VGG16 feature detector.
@@ -83,30 +86,29 @@ def project(
         buf.requires_grad = True
 
     # Setup camera
-    # cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(0)
 
     if is_spout:
-        spout = Spout(silent=True, width=G.img_resolution, height=G.img_resolution)
-        spout.createSender('GAN-src')
-        spout.createReceiver('CameraInput')
+        spout_src = Spout(silent=True, width=G_1.img_resolution, height=G_1.img_resolution)
+        spout_src.createSender('GAN-src')
+        spout_effect = Spout(silent=True, width=G_2.img_resolution, height=G_2.img_resolution)
+        spout_effect.createSender('GAN-effect')
 
+
+    src_z = torch.from_numpy(np.random.RandomState(random.randint(0, 500)).randn(1, G_2.z_dim)).to(device)
+    dst_z = torch.from_numpy(np.random.RandomState(random.randint(0, 500)).randn(1, G_2.z_dim)).to(device)
+
+    counter = 0.0
     while True:
-        if is_spout:
-            spout.check()
-            frame = spout.receive()
-
         start_time = time.time()
 
-        cv2.imshow('camera', frame[:, :, ::-1])
-        # ret, frame = cap.read()
-        # cv2.imshow('camera', frame)
+        ret, frame = cap.read()
+        cv2.imshow('camera', frame)
 
-        # target_pil = PIL.Image.fromarray(frame[:, :, ::-1])
-        # target_pil = target_pil.resize((G.img_resolution, G.img_resolution), PIL.Image.Resampling.LANCZOS)
-        # target_uint8 = np.array(target_pil, dtype=np.uint8)
-        # target = torch.tensor(target_uint8.transpose([2, 0, 1]), device=device)
-
-        target = torch.tensor(frame.transpose([2, 0, 1]), device=device)
+        target_pil = PIL.Image.fromarray(frame[:, :, ::-1])
+        target_pil = target_pil.resize((G_1.img_resolution, G_1.img_resolution), PIL.Image.Resampling.LANCZOS)
+        target_uint8 = np.array(target_pil, dtype=np.uint8)
+        target = torch.tensor(target_uint8.transpose([2, 0, 1]), device=device)
 
         # Features for target image.
         target_images = target.unsqueeze(0).to(device).to(torch.float32)
@@ -116,8 +118,8 @@ def project(
 
 
         w_noise = torch.randn_like(w_opt) * w_noise_scale
-        ws = (w_opt + w_noise).repeat([1, G.mapping.num_ws, 1])
-        synth_images = G.synthesis(ws, noise_mode='const')
+        ws = (w_opt + w_noise).repeat([1, G_1.mapping.num_ws, 1])
+        synth_images = G_1.synthesis(ws, noise_mode='const')
 
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
@@ -154,15 +156,37 @@ def project(
                 buf *= buf.square().mean().rsqrt()
 
         # Show image
-        img = G.synthesis(w_opt.detach()[0].repeat([1, G.mapping.num_ws, 1]), noise_mode='const')
+        img = G_1.synthesis(w_opt.detach()[0].repeat([1, G_1.mapping.num_ws, 1]), noise_mode='const')
         img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
         img = img[0].cpu().numpy()
 
         if is_spout:
-            spout.send(img)
+            spout_src.check()
+            spout_src.send(img)
 
         img = img[:, :, ::-1]
         cv2.imshow('result', img)
+
+
+        # 2nd GAN
+        z = interpolate(src_z, dst_z, counter)
+        with torch.no_grad():
+            img = G_2(z, None, truncation_psi=1, noise_mode='const')
+            img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
+            img = img[0].cpu().numpy()
+
+        if is_spout:
+            spout_effect.check()
+            spout_effect.send(img)
+
+        img = img[:, :, ::-1]
+        cv2.imshow('effect', img)
+
+        counter += 0.005
+        if counter >= 1.0:
+            counter = 0.0
+            src_z = dst_z
+            dst_z = torch.from_numpy(np.random.RandomState(random.randint(0, 500)).randn(1, G_2.z_dim)).to(device)
 
         end_time = time.time()
         print(f'fps: {1.0 / (end_time - start_time)}')
@@ -170,7 +194,7 @@ def project(
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    # cap.release()
+    cap.release()
     cv2.destroyAllWindows()
 
 #----------------------------------------------------------------------------
@@ -181,7 +205,8 @@ def size_range(s: str) -> List[int]:
 
 
 @click.command()
-@click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
+@click.option('--network1', 'network1_pkl', help='Network pickle filename', required=True)
+@click.option('--network2', 'network2_pkl', help='Network pickle filename', required=True)
 @click.option('--seed',                   help='Random seed', type=int, default=303, show_default=True)
 @click.option('--scale-type',
                 type=click.Choice(['pad', 'padside', 'symm','symmside']),
@@ -190,7 +215,8 @@ def size_range(s: str) -> List[int]:
 @click.option('--is_spout', type=bool, default=False, help='Spout option', required=False)
 
 def run_projection(
-    network_pkl: str,
+    network1_pkl: str,
+    network2_pkl: str,
     seed: int,
     scale_type: Optional[str],
     size: Optional[List[int]],
@@ -214,20 +240,27 @@ def run_projection(
     else:
         custom = False
 
-    G_kwargs = dnnlib.EasyDict()
-    G_kwargs.size = size 
-    G_kwargs.scale_type = scale_type
+    G_1_kwargs = dnnlib.EasyDict()
+    G_1_kwargs.size = size 
+    G_1_kwargs.scale_type = scale_type
+
+    G_2_kwargs = dnnlib.EasyDict()
+    G_2_kwargs.size = [256, 256]
+    G_2_kwargs.scale_type = scale_type
 
     # Load networks.
-    print('Loading networks from "%s"...' % network_pkl)
+    print('Loading networks from "%s"...' % network1_pkl)
     device = torch.device('cuda')
-    with dnnlib.util.open_url(network_pkl) as fp:
-        # G = legacy.load_network_pkl(fp)['G_ema'].requires_grad_(False).to(device) # type: ignore
-        G = legacy.load_network_pkl(fp, custom=custom, **G_kwargs)['G_ema'].requires_grad_(False).to(device) # type: ignore
+    with dnnlib.util.open_url(network1_pkl) as fp:
+        G_1 = legacy.load_network_pkl(fp, custom=custom, **G_1_kwargs)['G_ema'].requires_grad_(False).to(device) # type: ignore
+
+    with dnnlib.util.open_url(network2_pkl) as fp:
+        G_2 = legacy.load_network_pkl(fp, custom=custom, **G_2_kwargs)['G_ema'].requires_grad_(False).to(device) # type: ignore
 
     # Optimize projection.
     project(
-        G,
+        G_1,
+        G_2,
         device=device,
         verbose=True,
         is_spout=is_spout
